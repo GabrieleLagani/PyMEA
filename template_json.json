@@ -1,0 +1,25 @@
+{
+  "Model": 12,
+  "ChipRoi": 0,
+  "Groups": [
+    {
+      "PixelIndexes": [],
+      "GroupCriteria": null,
+      "Name": "PositiveEndpoints",
+      "UserDefinedName": "Positive End Points",
+      "Color": "118, 255, 3",
+      "Visible": true,
+      "Index": -1
+    },
+    {
+      "PixelIndexes": [],
+      "GroupCriteria": null,
+      "Name": "NegativeEndpoints",
+      "UserDefinedName": "Negative End Points",
+      "Color": "247, 25, 110",
+      "Visible": true,
+      "Index": -1
+    }
+  ],
+  "JsonVersion": 0
+}

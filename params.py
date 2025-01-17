@@ -1,0 +1,51 @@
+# Experiment parameters
+VERBOSE = 5
+DEBUG = True
+EXP_DEVICE = 'mea' # The device used for the experiment.
+EXP_SEEDS = [0] # The RNG seeds used for the experiment.
+EXP_DATASEEDS = [100] # The RNG seeds used for data splitting.
+EXP_RESTART = True # Whether to restart the experiment at every lunch.
+EPOCHS = 1 # Number of training epochs for the experiment.
+
+# Experiment details
+EXP_MODE = 'test' # Default 'test'. Either 'train', 'test', or 'traintest'. Whether you want to run the experiment in training mode, test mode, or both.
+DISH_ID = 'N1_DIV30' # The name of teh dish in use for the expderiment.
+EXP_DATASET = 'mnist' # Default 'mnist'. Either 'mnist', 'cifar10', or 'cifar100'. The name of the dataset you want to use.
+TST_SAMPLES = [0, 3] # The slice of dataset you want to use for testing.
+TRN_SAMPLES_PER_CLASS = 100 # How many train samples per class you want to use for tetanization.
+DETECT_EDGES = True # Whether to run edge detection on image samples.
+EXP_NAME = EXP_DATASET # The name that you want to assign to this experiment. This will be the name of the folder where the results are stored.
+
+# Device parameters
+nh, nw = 64, 64 # Device size.
+ENDIANNESS = '<' # Default '<'. Device representation endianness ('<' for little endian, '>' for big endian).
+D_MIN, D_MAX, A_MIN, A_MAX = 0, 4095, -8000., 8000. # DA params.
+samplingRate = 20000.0 # Sampling frequency of data frames from MEA electrodes.
+acquisitionTimePeriod = 100 # Period in ms to record data from BioCam.
+calibrationBlanking = 6 # None to disable. Default 0. Calibration blanking value.
+calibrationInterval = 400 # None to disable. Default 400. Calibration interval in ms.
+amplifBias = 550 # None to disable. Set to 'auto' for automatic calibration. Default 550. Amplifier voltage offset in mV.
+amplifShutOff = 1500 # None to disable. Default 1500. Calibration time, i.e. amount of time in us that the amplifiers are shut off during stimulation.
+
+# Stimulation parameters
+STIM_MODE = 'pulse' # Default 'pulse'. Either 'pulse' or 'burst'. The type of stmiulation to be used for the experiment.
+MAX_FIRING_LIKELIHOOD = 1.0 # Default 1.0. Maximum likelihood that an electrode can fire at a given instant of time, when a stimulus is delivered. Reducing this parameter creates a sparser representation, but allows to preserve the electordes lifetime for longer.
+STIM_AMPLITUDE = 1 # Stimulus pulse amplitude in uA.
+STIM_WIDTH = 10 # Stimulus pulse duration in us.
+STIM_INTERVAL = 10 # Time interval in seconds between consecutive stimuli.
+STIM_DURATION = 100 # Duration of the stimulation in milliseconds.
+STIM_MAX_FREQ = 10 # Maximum frequency of the spike-encoded stimulus.
+TET_STIM_AMPLITUDE = 1 # Stimulus pulse amplitude in uA.
+TET_STIM_WIDTH = 5 # Stimulus pulse duration in us.
+TET_DURATION = 400 # Duration of the tetanus in milliseconds.
+TET_MAX_FREQ = 10 # Maximum frequency of the spike-encoded tetanus.
+RECORD_TIME = [2, 2] # Time duration in seconds of the recording before and after a stimulus.
+
+# Compression and saving parameters
+HP_FILTER_FREQ = 100 # None to disable. Default 100. Frequency in Hz of the high-pass filter
+HP_FILTER_ORDER = 2 # Default 2. Order of the high-pass filter.
+COMPR_WINDOW = 2 # Default 2. Size of the spike detection window in milliseconds.
+COMPR_SIGMA_THR = 8 # Default 8. Threshold for the spike detection algorithm.
+COMPR_SAVE_WIDTH = 3 # Default 100. Number of milliseconds of spike form to save before and after a detected spike.
+SAVE_RAW = False # Whether to save the raw trace.
+
