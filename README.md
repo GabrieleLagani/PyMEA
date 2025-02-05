@@ -53,6 +53,9 @@ The file `exp.py` contains the experiment logic. The implementation is optimized
 leverages multiprocessing and vector operations, because the MEA can provide data with a
 very large frame rate, so it is essential to maximize efficiency to keep up.
 
+The file `brw.py` provides utility functions for reading data from the BrainWave file format, and 
+for converting saved recording dictionaries to such format.
+
 The files `make_json_dataset.py` and `json_exp.py` provide another entry point which allows users to transform samples
 from computer vision datasets to json files that can be read by the default MEA GUI interfacing tool 
 provided by 3Brain. Once a given image is saved as a json file, it can be opened by the tool and used 

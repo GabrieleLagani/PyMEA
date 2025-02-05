@@ -1,5 +1,6 @@
 import os
 import argparse
+import math
 import random
 from tqdm import tqdm
 from queue import Queue
@@ -11,6 +12,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Subset, ConcatDataset
 
+import params
 from data import CustomMNIST as MNIST, CustomCIFAR10 as CIFAR10, CustomCIFAR100 as CIFAR100, get_transform
 from device import MEADevice, DummyDevice
 import utils
@@ -41,24 +43,26 @@ class MultiProcOutputCollector:
 	@staticmethod
 	def _worker_fn(o):
 		raw, fs, mode, dish_id, index, input, label, savepath = o
-		raw, filtered, processed, pred = MultiProcOutputCollector.process_output(raw, fs)
+		raw, filtered, processed, pred, global_response = MultiProcOutputCollector.process_output(raw, fs)
+		print("\nRecording of sample {} completed with global response {}".format(index, global_response))
 		if mode == 'test':
-			utils.save_recording(raw, processed, pred, fs, RECORD_TIME[0]*fs, dish_id, index, input, label,
+			utils.save_recording(raw, processed, pred, global_response, fs, int(RECORD_TIME[0]*fs), int((RECORD_TIME[0]+RECORD_TIME[1])*fs), dish_id, index, input, label,
 								 os.path.join(savepath, '{}'.format(label), '{}_{}.pt'.format(dish_id, index)))
 			utils.save_recording_params(os.path.join(savepath, '{}'.format(label), '{}_{}_params.json'.format(dish_id, index)))
 			utils.save_recording_brw(processed, os.path.join(savepath, '{}'.format(label), '{}_{}.brw'.format(dish_id, index)))
-		return pred, label
+		return pred, label, global_response
 
 	@staticmethod
 	def process_output(raw, fs):
 		filtered = utils.butter_highpass_filter(raw, fs, HP_FILTER_FREQ, HP_FILTER_ORDER) if HP_FILTER_FREQ is not None else raw
-		spike_times, channels, spike_forms, sigma_noise = utils.detect_spikes(filtered, fs, COMPR_WINDOW, COMPR_SIGMA_THR, COMPR_SAVE_WIDTH)
-		processed = {'spike_times': spike_times, 'channels': channels, 'spike_forms': spike_forms, 'sigma_noise': sigma_noise}
+		spike_times, channels, spike_forms, sf_starts, sigma_noise = utils.detect_spikes(filtered, fs, COMPR_WINDOW, COMPR_SIGMA_THR, COMPR_SAVE_WIDTH)
+		processed = {'spike_times': spike_times, 'channels': channels, 'spike_forms': spike_forms, 'sf_starts': sf_starts, 'sigma_noise': sigma_noise}
 		scores = MultiProcOutputCollector._scores_from_raw(filtered)
 		#scores = MultiProcOutputCollector._scores_from_processed(processed)
 		pred = torch.argmax(scores).item()
+		global_response =  MultiProcOutputCollector._global_response(spike_times, fs, RECORD_TIME[0], w_start=GLOBAL_RESPONSE_W_START, w_end=GLOBAL_RESPONSE_W_END, w_antisymm=GLOBAL_RESPONSE_W_ANTISYMM)
 		raw = raw if SAVE_RAW else None
-		return raw, filtered, processed, pred
+		return raw, filtered, processed, pred, global_response
 
 	@staticmethod
 	def _scores_from_raw(data):
@@ -72,6 +76,13 @@ class MultiProcOutputCollector:
 		ch_pos = [ch for ch in channels if utils.idx2coords(ch)[1] >= nw // 2]
 		scores = torch.tensor([len(channels) - len(ch_pos), len(ch_pos)], dtype=torch.float16)
 		return scores
+
+	@staticmethod
+	def _global_response(spike_times, fs, ref_time, w_start=0, w_end=5e-3, w_antisymm=True):
+		ref_time, w_start, w_end = ref_time * fs, w_start * fs, w_end * fs
+		res = sum([1 if (st > ref_time + w_start) and (st <= ref_time + w_end) else 0 for st in spike_times])
+		if w_antisymm: res -= sum([(st < ref_time - w_start) and (st >= ref_time - w_end) for st in spike_times])
+		return res
 
 	@staticmethod
 	def wait_until_done():
@@ -101,8 +112,10 @@ class Experiment:
 		self.result_path = os.path.join(self.exp_folder, 'results.csv')
 		self.checkpoint_path = os.path.join(self.exp_folder, 'checkpoint.pt')
 		self.recordings_path = os.path.join(self.exp_folder, 'recordings')
+		self.data_perm_save_path = os.path.join(self.exp_folder, 'dataperm.json')
 		
 		# Preparing data
+		self.data_len = None
 		utils.set_rng_seed(self.dataseed)
 		self.trn_set, self.tst_set = self.get_trn_tst_sets()
 		
@@ -164,6 +177,7 @@ class Experiment:
 			tst_dataset = CIFAR100(root=os.path.join(self.data_folder, 'mnist'), train=False, transform=get_transform(detect_edges=DETECT_EDGES), download=True)
 		if trn_dataset is None or tst_dataset is None:
 			raise ValueError("Unsupported dataset {}. Only mnist, cifar10, cifar100 are supported.".format(self.dataset))
+		self.data_len = len(trn_dataset) + len(tst_dataset)
 		#return self._get_trn_tst_sets(trn_dataset, tst_dataset)
 		return self._get_trn_tst_sets_slice(trn_dataset, tst_dataset)
 
@@ -171,16 +185,20 @@ class Experiment:
 		return DataLoader(trn_dataset, batch_size=1, shuffle=True, num_workers=1), DataLoader(tst_dataset, batch_size=1, shuffle=False, num_workers=1)
 
 	def _get_trn_tst_sets_slice(self, trn_dataset, tst_dataset):
+		n_train, n_test = len(trn_dataset), len(tst_dataset)
 		cls_indices = {cls: torch.nonzero(trn_dataset.targets == cls).reshape(-1).tolist()[:TRN_SAMPLES_PER_CLASS] for cls in range(len(trn_dataset.classes))}
 		trn_indices = [idx for cls, idxs in cls_indices.items() for idx in idxs]
 		chosen_trn_indices = [idx for cls, idxs in cls_indices.items() if cls in [0, 1] for idx in idxs]
 		random.shuffle(chosen_trn_indices)
-		trn_dataset_shuffled, trn_dataset = Subset(trn_dataset, chosen_trn_indices), Subset(trn_dataset, [i for i in range(len(trn_dataset)) if i not in trn_indices])
+		trn_perm, tst_perm = chosen_trn_indices, [i for i in range(len(trn_dataset)) if i not in trn_indices]
+		trn_dataset_shuffled, trn_dataset = Subset(trn_dataset, chosen_trn_indices), Subset(trn_dataset, tst_perm)
 		tst_dataset = ConcatDataset([trn_dataset, tst_dataset])
 		tst_indices = list(range(len(tst_dataset)))
 		random.shuffle(tst_indices)
+		tst_perm = [tst_perm[i] if i < len(tst_perm) else n_train+i for i in tst_indices]
 		tst_indices = tst_indices[TST_SAMPLES[0]:TST_SAMPLES[1]]
 		tst_dataset_shuffled = Subset(tst_dataset, tst_indices)
+		utils.save_data_permutation(self.data_perm_save_path, trn_perm, tst_perm)
 		return DataLoader(trn_dataset_shuffled, batch_size=1, shuffle=True, num_workers=1), DataLoader(tst_dataset_shuffled, batch_size=1, shuffle=False, num_workers=1)
 
 	def deliver_signal(self, signal, max_freq, duration):
@@ -231,12 +249,12 @@ class Experiment:
 		# Iterate through dataset, send inputs to device, record and process outputs
 		for indexes, inputs, labels in tqdm(dataset):
 			for index, input, label in zip(indexes, inputs, labels):
-				self.process_sample(index, input, label)
+				self.process_sample(str(index.item()).zfill(int(math.log10(self.data_len))+1), input, label)
 
 		# Once predictions have been collected, determine epoch performance
 		hits, count = 0, 0
 		predictions = MultiProcOutputCollector.get_results()
-		for pred, label in predictions:
+		for pred, label, _ in predictions:
 			res = (pred == label).int().sum().item()
 			hits += res
 			count += 1

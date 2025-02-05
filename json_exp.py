@@ -1,5 +1,6 @@
 import os
 import argparse
+import math
 import random
 from tqdm import tqdm
 import json
@@ -26,8 +27,10 @@ class Experiment:
 		self.data_folder = 'datasets'
 		self.exp_folder = os.path.join('json_datasets', self.exp_name, 'iter{}'.format(self.seed))
 		self.json_path = os.path.join(self.exp_folder, 'json_files')
+		self.data_perm_save_path = os.path.join(self.exp_folder, 'dataperm.json')
 
 		# Preparing data
+		self.data_len = None
 		utils.set_rng_seed(self.dataseed)
 		self.trn_set, self.tst_set = self.get_trn_tst_sets()
 
@@ -47,6 +50,7 @@ class Experiment:
 			tst_dataset = CIFAR100(root=os.path.join(self.data_folder, 'mnist'), train=False, transform=get_transform(detect_edges=DETECT_EDGES), download=True)
 		if trn_dataset is None or tst_dataset is None:
 			raise ValueError("Unsupported dataset {}. Only mnist, cifar10, cifar100 are supported.".format(self.dataset))
+		self.data_len = len(trn_dataset) + len(tst_dataset)
 		#return self._get_trn_tst_sets(trn_dataset, tst_dataset)
 		return self._get_trn_tst_sets_slice(trn_dataset, tst_dataset)
 
@@ -54,16 +58,20 @@ class Experiment:
 		return DataLoader(trn_dataset, batch_size=1, shuffle=True, num_workers=1), DataLoader(tst_dataset, batch_size=1, shuffle=False, num_workers=1)
 
 	def _get_trn_tst_sets_slice(self, trn_dataset, tst_dataset):
+		n_train, n_test = len(trn_dataset), len(tst_dataset)
 		cls_indices = {cls: torch.nonzero(trn_dataset.targets == cls).reshape(-1).tolist()[:TRN_SAMPLES_PER_CLASS] for cls in range(len(trn_dataset.classes))}
 		trn_indices = [idx for cls, idxs in cls_indices.items() for idx in idxs]
 		chosen_trn_indices = [idx for cls, idxs in cls_indices.items() if cls in [0, 1] for idx in idxs]
 		random.shuffle(chosen_trn_indices)
-		trn_dataset_shuffled, trn_dataset = Subset(trn_dataset, chosen_trn_indices), Subset(trn_dataset, [i for i in range(len(trn_dataset)) if i not in trn_indices])
+		trn_perm, tst_perm = chosen_trn_indices, [i for i in range(len(trn_dataset)) if i not in trn_indices]
+		trn_dataset_shuffled, trn_dataset = Subset(trn_dataset, chosen_trn_indices), Subset(trn_dataset, tst_perm)
 		tst_dataset = ConcatDataset([trn_dataset, tst_dataset])
 		tst_indices = list(range(len(tst_dataset)))
 		random.shuffle(tst_indices)
+		tst_perm = [tst_perm[i] if i < len(tst_perm) else n_train + i for i in tst_indices]
 		tst_indices = tst_indices[TST_SAMPLES[0]:TST_SAMPLES[1]]
 		tst_dataset_shuffled = Subset(tst_dataset, tst_indices)
+		utils.save_data_permutation(self.data_perm_save_path, trn_perm, tst_perm)
 		return DataLoader(trn_dataset_shuffled, batch_size=1, shuffle=True, num_workers=1), DataLoader(tst_dataset_shuffled, batch_size=1, shuffle=False, num_workers=1)
 
 	def save_json(self, index, signal, label):
@@ -97,7 +105,7 @@ class Experiment:
 		# Iterate through dataset, send inputs to device, record and process outputs
 		for indexes, inputs, labels in tqdm(dataset):
 			for index, input, label in zip(indexes, inputs, labels):
-				self.process_sample(index, input, label)
+				self.process_sample(str(index.item()).zfill(int(math.log10(self.data_len))+1), input, label)
 
 	def train(self):
 		# Train

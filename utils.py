@@ -12,6 +12,7 @@ import torch
 import torch.nn.functional as F
 
 import params as P
+import utils
 
 #tic = time
 tic = timeit.default_timer
@@ -118,7 +119,7 @@ def detect_spikes(data, freq, window, sigma_thr, save_width):
 	binned_data = data[:num_windows*window].reshape(num_windows, window, data.shape[1])
 	pos_peak, neg_peak = binned_data.max(dim=1), binned_data.min(dim=1)
 	idx = ((pos_peak[0] - neg_peak[0]) / sigma) > sigma_thr
-	spike_times, channels, spike_forms = [], [], []
+	spike_times, channels, spike_forms, sf_starts = [], [], [], []
 	for w in range(num_windows):
 		centers = (neg_peak[1][w, idx[w]] + w*window).reshape(-1)
 		st = centers.tolist()
@@ -129,22 +130,32 @@ def detect_spikes(data, freq, window, sigma_thr, save_width):
 		spike_times += st
 		channels += ch
 		spike_forms += sf
-	return spike_times, channels, spike_forms, sigma
+		sf_starts += [start] * len(sf)
+	sigma_noise = sigma.reshape(-1).tolist()
+	return spike_times, channels, spike_forms, sf_starts, sigma_noise
 
 # Save recordings obtained from MEA to disk
-def save_recording(raw, processed, pred, fps, stim_time, dish_id, index, input, label, path):
+def save_recording(raw, processed, pred, global_response, fps, stim_time, duration, dish_id, index, input, label, path):
 	d = {
 		'raw': raw,
 		'processed': processed,
 		'pred': pred,
+		'global_response': global_response,
 		'fps': fps,
 		'stim_time': stim_time,
+		'duration': duration,
 		'dish_id': dish_id,
 		'index': index,
 		'input': input,
 		'label': label,
 	}
 	save_dict(d, path)
+
+# Save data permutation as json file
+def save_data_permutation(path, trn_perm, tst_perm):
+	os.makedirs(os.path.dirname(path), exist_ok=True)
+	with open(path, 'w+') as f:
+		json.dump({'trn_perm': trn_perm, 'tst_perm': tst_perm}, f)
 
 # Save recording params to disk
 def save_recording_params(path):
@@ -157,42 +168,6 @@ def save_recording_params(path):
 def save_recording_brw(processed, path):
 	# Not implemented
 	pass
-
-
-# Read recordings from brw file. If channels are provided, read only the selected channels. Read all channels by default.
-def read_brw(path, channels=None):
-	if channels is None: channels = list(range(P.nh*P.nw))
-	data = {ch: {} for ch in channels}
-	byteorder = {'little': '<', 'big': '>'}[P.ENDIANNESS]
-	print("Opening file {}...".format(path))
-	with h5py.File(path, 'r') as f:
-		binary_data = f['Well_A1/EventsBasedSparseRaw']
-		data_length = len(binary_data)
-		pos = 0
-		while pos < data_length:
-			print("\r\33[KReading... {:.2f}%".format(100*pos/data_length), end="")
-			ch = int.from_bytes(binary_data[pos:pos + 4], byteorder=byteorder, signed=True)
-			pos += 4
-			chDataLength = int.from_bytes(binary_data[pos:pos + 4], byteorder=byteorder, signed=True)
-			pos += 4
-			if ch not in channels:
-				pos += chDataLength
-				continue
-			chDataPos = pos
-			while pos < chDataPos + chDataLength:
-				start = int.from_bytes(binary_data[pos:pos + 8], byteorder=byteorder, signed=True)
-				pos += 8
-				end = int.from_bytes(binary_data[pos:pos + 8], byteorder=byteorder, signed=True)
-				pos += 8
-				data[ch][start] = np.zeros(end - start, dtype=np.float16)
-				rangeDataPos = pos
-				for j in range(start, end):
-					data[ch][start][j-start] = digital2analog(int.from_bytes(binary_data[rangeDataPos:rangeDataPos + 2], byteorder=byteorder, signed=True))
-					rangeDataPos += 2
-				pos += (end - start) * 2
-		print("\r\33[KReading... 100.00%")
-	return data
-
 
 # Convert analog to digital
 def analog2digital(a, d_min=P.D_MIN, d_max=P.D_MAX, a_min=P.A_MIN, a_max=P.A_MAX):
