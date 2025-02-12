@@ -56,11 +56,19 @@ very large frame rate, so it is essential to maximize efficiency to keep up.
 The file `brw.py` provides utility functions for reading data from the BrainWave file format, and 
 for converting saved recording dictionaries to such format.
 
-The files `make_json_dataset.py` and `json_exp.py` provide another entry point which allows users to transform samples
+The files `make_json_dataset.py` and `json_data_convert.py` provide another entry point which allows users to transform samples
 from computer vision datasets to json files that can be read by the default MEA GUI interfacing tool 
 provided by 3Brain. Once a given image is saved as a json file, it can be opened by the tool and used 
 for stimulation and recording from the GUI. Of course this is useful to observe the cultured network 
 in real time, but cannot scale to manually showing thousands of images.
+
+Files `run_json_exp.py` and `json_exp.py` can be used to drive stimulation protocols with a custom JSON dataset containing 
+stimulus patterns designed through the BrainWave interface. The custom dataset folder must be placed 
+inside the `datasets` directory. The internal structure of the folder must be organized as follows:
+a subfolder `samples` contains the JSON files; an additional optional folder `targets` can contain a selection of desired
+target output electrodes, again encoded as JSON files. If targets are used, each target file must correspond to one sample 
+file and vice-versa.
+
 
 Files `utils.py`, `data.py`, and `visualize.py` provide other utility functions.
 

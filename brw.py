@@ -1,4 +1,6 @@
 import argparse
+import os
+
 import h5py
 import json
 from struct import pack, unpack
@@ -11,10 +13,12 @@ import torch
 import utils
 
 
-_PATH = r"C:\Users\BioCAM User\Desktop\PyMEA\results\mnist\iter0\recordings\0\N1_DIV30_25928.pt"
+_PATH = r"C:\Users\BioCAM User\Desktop\PyMEA\results\mnist\iter0\recordings0\7\CHIR_N1_DIV48_16113.pt"
+_DEST = r"C:\Users\BioCAM User\Desktop\PyMEA\results\mnist_brw\iter0\recordings0\7\CHIR_N1_DIV48_16113.brw"
 _FRAMES_PER_CHUNK = 24690
 _SYNC_SIGNAL_PERIOD = 0.4 # None to disable. Default 400. Period in s of the synchronization signals to visualize on channel 0
 _SYNC_SIGNAL_DELAY = 0.07 # None to disable. Default 0. Delay in s of the first synchronization signal to visualize on channel 0
+_NOISE_SCALING  = 0.33
 
 MaxAnalogValue = 8000.0
 MinAnalogValue = -8000.0
@@ -162,12 +166,13 @@ def write_brw(path, spike_times, channels, spike_forms, sf_starts, sigma_noise, 
 			data += _write_chunk(chunk)
 			noiseToc.append(len(noiseMean)*4)
 			noiseMean += _type_agnostic_ad_convert(np.zeros_like(np.asarray(sigma_noise, dtype=np.float32))).tolist()
-			noiseStdDev += _type_agnostic_ad_convert(np.asarray(sigma_noise, dtype=np.float32), affine=False).tolist()
+			noiseStdDev += _type_agnostic_ad_convert(_NOISE_SCALING * np.asarray(sigma_noise, dtype=np.float32), affine=False).tolist()
 			noiseChIdxs += list(range(len(sigma_noise)))
 		return [b for b in data], eventToc, toc, noiseMean, noiseStdDev, noiseChIdxs, noiseToc
 
 	EventsBasedSparseRaw, eventToc, toc, noiseMean, noiseStdDev, noiseChIdxs, noiseToc = _write_sparse_raw(spike_times, channels, spike_forms, sf_starts, sigma_noise, fs, stim_time, duration, frames_per_chunk=frames_per_chunk)
 
+	os.makedirs(os.path.dirname(path), exist_ok=True)
 	with h5py.File(path, 'a') as of:
 		of.attrs['Description'] = np.asarray(b'')
 		of.attrs['ExperimentDateTimeUtc'] = int(datetime.datetime.now(datetime.UTC).timestamp())
@@ -203,19 +208,20 @@ def spikes_from_bxr(path):
 		spike_forms = _type_agnostic_da_convert(spike_forms.reshape(len(spike_times), -1))
 	return spike_times, channels, spike_forms
 
-def pt2brw(path):
+def pt2brw(path, dest):
 	# Load saved dictionary with keys: raw, processed, pred, global_response, fps, stim_time, dish_id, index, input, label, path
 	d = utils.load_dict(path)
 	data = d['processed']
-	write_brw(path.replace('.pt', '.brw'), data['spike_times'], data['channels'], data['spike_forms'], data['sf_starts'], data['sigma_noise'], d['fps'], d['stim_time'], d['duration'])
+	write_brw(dest, data['spike_times'], data['channels'], data['spike_forms'], data['sf_starts'], data['sigma_noise'], d['fps'], d['stim_time'], d['duration'])
 
 
 if __name__ == '__main__':
 	# Parse command line arguments
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--path', type=str, default=_PATH, help="Path of the '.pt' file to be converted to '.brw'")
+	parser.add_argument('--dest', type=str, default=_DEST, help="Path of the '.pt' file to be converted to '.brw'")
 
 	args = parser.parse_args()
 
-	pt2brw(args.path)
+	pt2brw(args.path, args.dest)
 

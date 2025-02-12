@@ -196,7 +196,7 @@ def wait_until(end, eps=.1):
 		else: sleep(eps / 20)
 
 def gen_signal(input, label):
-	padding= [1, 1, 1, 1]
+	padding = [1, 1, 1, 1]
 	signal = F.interpolate(input.mean(dim=0).reshape(1, 1, input.shape[-2], input.shape[-1]), ((P.nh//2) - padding[0] - padding[1], (P.nw//2) - padding[2] - padding[3]))[0, 0, :, :]
 	target = torch.zeros_like(signal)
 	h_loc_0, w_loc_0 = (2 * (P.nh // 2)) // 3, (P.nw // 2) // 3
@@ -207,3 +207,8 @@ def gen_signal(input, label):
 	masked_signal = torch.cat([signal, torch.zeros_like(target)], dim=-2)
 	signal = torch.cat([signal, target], dim=-2)
 	return signal, masked_signal
+
+def mask_signal(input, mask):
+	masked_signal = input.clone().detach()
+	masked_signal[mask != 0] = 0
+	return masked_signal

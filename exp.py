@@ -42,11 +42,11 @@ class MultiProcOutputCollector:
 
 	@staticmethod
 	def _worker_fn(o):
-		raw, fs, mode, dish_id, index, input, label, savepath = o
+		raw, fs, mode, dish_id, index, input, label, delivery_latency, savepath = o
 		raw, filtered, processed, pred, global_response = MultiProcOutputCollector.process_output(raw, fs)
-		print("\nRecording of sample {} completed with global response {}".format(index, global_response))
+		print("\nRecording of sample {} completed with global response {} and latency {}".format(index, global_response, delivery_latency))
 		if mode == 'test':
-			utils.save_recording(raw, processed, pred, global_response, fs, int(RECORD_TIME[0]*fs), int((RECORD_TIME[0]+RECORD_TIME[1])*fs), dish_id, index, input, label,
+			utils.save_recording(raw, processed, pred, global_response, fs, int(delivery_latency*fs + RECORD_TIME[0]*fs), int((RECORD_TIME[0]+RECORD_TIME[1])*fs), dish_id, index, input, label,
 								 os.path.join(savepath, '{}'.format(label), '{}_{}.pt'.format(dish_id, index)))
 			utils.save_recording_params(os.path.join(savepath, '{}'.format(label), '{}_{}_params.json'.format(dish_id, index)))
 			utils.save_recording_brw(processed, os.path.join(savepath, '{}'.format(label), '{}_{}.brw'.format(dish_id, index)))
@@ -65,8 +65,8 @@ class MultiProcOutputCollector:
 		return raw, filtered, processed, pred, global_response
 
 	@staticmethod
-	def _scores_from_raw(data):
-		scores = data[:, nh//2:, :].reshape(-1, nh//2, 2, nw//2).sum(dim=(0, 1, 3))
+	def _scores_from_raw(raw):
+		scores = raw[:, nh // 2:, :].reshape(-1, nh // 2, 2, nw // 2).sum(dim=(0, 1, 3))
 		return scores
 
 	@staticmethod
@@ -203,21 +203,23 @@ class Experiment:
 
 	def deliver_signal(self, signal, max_freq, duration):
 		self.last_stim_time = utils.tic()
-		T = int(max_freq * duration / 1000) if STIM_MODE == 'pulse' else 1
+		bin = FIRING_BINS
+		T = int(bin * max_freq * duration / 1000) if STIM_MODE == 'pulse' else 1
+		bin_size = duration / T
 		eps = (1 / max_freq)
 		last_pulse_time = 0
 		for t in range(0, T):
 			# Convert encoded input to spike signal
-			spikes = torch.bernoulli(signal*MAX_FIRING_LIKELIHOOD)
+			spikes = torch.bernoulli(signal*MAX_FIRING_LIKELIHOOD / bin)
 			spikes = torch.repeat_interleave(spikes, repeats=2, dim=-1)
 			spikes[:, 1::2] *= -1
 			# Send signal to device
 			utils.wait_until(last_pulse_time + eps)
 			last_pulse_time = utils.tic()
 			if STIM_MODE == 'pulse':
-				self.device.send_signal(spikes)
+				self.device.send_signal(spikes, 1000 / bin_size, bin_size)
 			elif STIM_MODE == 'burst':
-				self.device.send_burst(spikes, max_freq, duration)
+				self.device.send_signal(spikes, max_freq, duration)
 			else:
 				raise ValueError("Unsupported stimulation mode {}, only pulse or burst available".format(STIM_MODE))
 	
@@ -235,15 +237,19 @@ class Experiment:
 		# Start activity recording for next stimulation
 		utils.wait_until(self.last_stim_time + STIM_INTERVAL - RECORD_TIME[0])
 		self.device.set_record_until(utils.tic() + RECORD_TIME[0] + RECORD_TIME[1])
+		record_started = utils.tic()
 		
 		# Send stimulation for evaluation and record activity
-		utils.wait_until(self.last_stim_time + STIM_INTERVAL)
+		utils.wait_until(record_started + RECORD_TIME[0])
+		self.device.reset_stim_end_time()
 		self.deliver_signal(masked_signal, max_freq=STIM_MAX_FREQ, duration=STIM_DURATION)
+		setup_latency = utils.tic() - self.last_stim_time
 		
 		# Wait for device recording to complete, then read recorded activity
 		utils.wait_until(self.device.get_record_until())
 		raw = self.device.read_activity()
-		self.outputs.put((raw, self.device.true_fps, self.mode, self.dish_id, index, input, label, self.recordings_path))
+		delivery_latency = max(self.device.get_stim_end_time() - self.last_stim_time, 0)
+		self.outputs.put((raw, self.device.true_fps, self.mode, self.dish_id, index, input, label, delivery_latency, self.recordings_path + '{}'.format(self.epoch)))
 	
 	def process_epoch(self, dataset):
 		# Iterate through dataset, send inputs to device, record and process outputs
