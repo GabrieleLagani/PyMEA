@@ -43,26 +43,30 @@ class MultiProcOutputCollector:
 	@staticmethod
 	def _worker_fn(o):
 		raw, fs, mode, dish_id, index, input, label, delivery_latency, savepath = o
-		raw, filtered, processed, pred, global_response = MultiProcOutputCollector.process_output(raw, fs)
-		print("\nRecording of sample {} completed with global response {} and latency {}".format(index, global_response, delivery_latency))
+		raw, filtered, processed, pred, stim_time, global_response, delta = MultiProcOutputCollector.process_output(raw, fs)
+		delivery_latency = (stim_time - RECORD_TIME[0]) if delivery_latency == 0 else delivery_latency
 		if mode == 'test':
-			utils.save_recording(raw, processed, pred, global_response, fs, int(delivery_latency*fs + RECORD_TIME[0]*fs), int((RECORD_TIME[0]+RECORD_TIME[1])*fs), dish_id, index, input, label,
+			utils.save_recording(raw, processed, pred, global_response, delta, fs, int(delivery_latency*fs + RECORD_TIME[0]*fs), int((RECORD_TIME[0]+RECORD_TIME[1])*fs), dish_id, index, input, label,
 								 os.path.join(savepath, '{}'.format(label), '{}_{}.pt'.format(dish_id, index)))
 			utils.save_recording_params(os.path.join(savepath, '{}'.format(label), '{}_{}_params.json'.format(dish_id, index)))
-			utils.save_recording_brw(processed, os.path.join(savepath, '{}'.format(label), '{}_{}.brw'.format(dish_id, index)))
-		return pred, label, global_response
+			utils.save_recording_brw(processed, os.path.join(savepath, '{}'.format(label), '{}_{}.brw'.format(dish_id, index)),
+									 fs, int(delivery_latency*fs + RECORD_TIME[0]*fs), int((RECORD_TIME[0]+RECORD_TIME[1])*fs))
+		print("\nRecording of sample {} completed with global response {} (delta {}) and latency {}".format(index, global_response, delta, delivery_latency))
+		return pred, label, global_response, delta
 
 	@staticmethod
 	def process_output(raw, fs):
-		filtered = utils.butter_highpass_filter(raw, fs, HP_FILTER_FREQ, HP_FILTER_ORDER) if HP_FILTER_FREQ is not None else raw
+		filtered = raw #utils.butter_highpass_filter(raw, fs, HP_FILTER_FREQ, HP_FILTER_ORDER) if HP_FILTER_FREQ is not None else raw
 		spike_times, channels, spike_forms, sf_starts, sigma_noise = utils.detect_spikes(filtered, fs, COMPR_WINDOW, COMPR_SIGMA_THR, COMPR_SAVE_WIDTH)
 		processed = {'spike_times': spike_times, 'channels': channels, 'spike_forms': spike_forms, 'sf_starts': sf_starts, 'sigma_noise': sigma_noise}
 		scores = MultiProcOutputCollector._scores_from_raw(filtered)
 		#scores = MultiProcOutputCollector._scores_from_processed(processed)
 		pred = torch.argmax(scores).item()
-		global_response =  MultiProcOutputCollector._global_response(spike_times, fs, RECORD_TIME[0], w_start=GLOBAL_RESPONSE_W_START, w_end=GLOBAL_RESPONSE_W_END, w_antisymm=GLOBAL_RESPONSE_W_ANTISYMM)
+		#stim_time = RECORD_TIME[0]
+		stim_time = min([st for i, st in enumerate(spike_times) if channels[i] == 1]) / fs
+		global_response, delta =  MultiProcOutputCollector._global_response(spike_times, fs, stim_time, w_start=GLOBAL_RESPONSE_W_START, w_end=GLOBAL_RESPONSE_W_END)
 		raw = raw if SAVE_RAW else None
-		return raw, filtered, processed, pred, global_response
+		return raw, filtered, processed, pred, stim_time, global_response, delta
 
 	@staticmethod
 	def _scores_from_raw(raw):
@@ -78,11 +82,11 @@ class MultiProcOutputCollector:
 		return scores
 
 	@staticmethod
-	def _global_response(spike_times, fs, ref_time, w_start=0, w_end=5e-3, w_antisymm=True):
+	def _global_response(spike_times, fs, ref_time, w_start=0, w_end=5e-3):
 		ref_time, w_start, w_end = ref_time * fs, w_start * fs, w_end * fs
 		res = sum([1 if (st > ref_time + w_start) and (st <= ref_time + w_end) else 0 for st in spike_times])
-		if w_antisymm: res -= sum([(st < ref_time - w_start) and (st >= ref_time - w_end) for st in spike_times])
-		return res
+		delta = res - sum([1 if (st < ref_time - w_start) and (st >= ref_time - w_end) else 0 for st in spike_times])
+		return res, delta
 
 	@staticmethod
 	def wait_until_done():
@@ -217,9 +221,9 @@ class Experiment:
 			utils.wait_until(last_pulse_time + eps)
 			last_pulse_time = utils.tic()
 			if STIM_MODE == 'pulse':
-				self.device.send_signal(spikes, 1000 / bin_size, bin_size)
+				self.device.send_signal(spikes)
 			elif STIM_MODE == 'burst':
-				self.device.send_signal(spikes, max_freq, duration)
+				self.device.send_burst(spikes, max_freq, duration)
 			else:
 				raise ValueError("Unsupported stimulation mode {}, only pulse or burst available".format(STIM_MODE))
 	
@@ -260,7 +264,7 @@ class Experiment:
 		# Once predictions have been collected, determine epoch performance
 		hits, count = 0, 0
 		predictions = MultiProcOutputCollector.get_results()
-		for pred, label, _ in predictions:
+		for pred, label, _, _ in predictions:
 			res = (pred == label).int().sum().item()
 			hits += res
 			count += 1

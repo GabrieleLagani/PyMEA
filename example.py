@@ -12,7 +12,7 @@ dll_modules = ['3Brain.BioCamDriver', '3Brain.Common']
 for m in dll_modules:
 	clr.AddReference(m) # import .dll into python
 # Import C# Objects into Python from namespaces
-from _3Brain.BioCamDriver import BioCamPool, StimEndPoint, BioCamStimExternalEndPoint, StimTrainProtocol
+from _3Brain.BioCamDriver import BioCamPool, BioCamIOSignal, StimEndPoint, BioCamStimExternalEndPoint, StimTrainProtocol
 from _3Brain.Common import ChCoord, RectangularStimPulse
 from System import Console
 Console.WriteLine("Hello from C#")
@@ -42,7 +42,10 @@ def BioCam_DataReceived(sender, e):
 	global data_received_count
 	global data
 	data_received_count += 1
-	data.append(e.Payload)
+	d = e.Payload
+	d = bytes(d)
+	#d = unpack('<' + 'h' * (len(d) // 2), d)
+	data.append(d)
 def BioCam_DataStreamingError(sender, e):
 	global data_error_count
 	data_error_count += 1
@@ -51,7 +54,6 @@ def BioCam_DataLossAsync(sender, e):
 	data_loss_count += 1
 
 
-startTime = time()
 bioCam = None
 
 try:
@@ -72,6 +74,7 @@ try:
 		raise RuntimeError("MEA plate not connected")
 	print("BioCamPool attributes: {}".format(dir(BioCamPool)))
 	print("bioCam attributes: {}".format(dir(bioCam)))
+	print("bioCam Settings attributes: {}".format(dir(bioCam.Settings)))
 	print("Bytes per sample: {}".format(bioCam.NBytesPerChSample))
 	print("Is Little endian: {}".format(bioCam.IsDataOnComPortLittleEndian))
 
@@ -93,6 +96,17 @@ try:
 	print("Setting frame rate to {}".format(samplingRate))
 	bioCam.Settings.AproxTargetFrameRate = samplingRate
 	print("True sampling rate set to {}".format(bioCam.DataFormat.FrameRate))
+
+	# Setting Calibration signal on pin 1, 1, and IO Signal on pin 1, 2
+	bioCam.Settings.IOSignalsSettings[BioCamIOSignal.InternalChipCalibration].IsOn = True
+	bioCam.Settings.IOSignalsSettings[BioCamIOSignal.InternalChipCalibration].OutputCh = ChCoord(1, 1)
+	bioCam.Settings.IOSignalsSettings[BioCamIOSignal.InternalStimulation].IsOn = True
+	bioCam.Settings.IOSignalsSettings[BioCamIOSignal.InternalStimulation].OutputCh = ChCoord(1, 2)
+
+	bioCam.MeaPlate.CalibrationBlankingValue = 6
+	bioCam.MeaPlate.CalibrationIntervalMs = 400
+	bioCam.Stimulator.Settings.IsStimCalibrationOn = True
+	bioCam.Stimulator.Settings.CalibrationDistanceMicroSec = 1500
 
 	# Start BioCam acquisition
 	isStreaming = bioCam.StartDataStreaming(dataPacketTimeSpanMs=acquisitionTimePeriod, optimizedDataPacketLatency=True)
@@ -118,7 +132,8 @@ try:
 	        RectangularStimPulse.Default.Properties.MaxAmplitude,
 	        RectangularStimPulse.Default.Properties.TimeResolutionMicroSec))
 
-	sleep(stimPeriod // 1000)
+	startTime = time()
+	sleep(stimPeriod / 1000)
 	while time() < startTime + duration:
 		# Send rectangular pulse on selected endpoints
 		print("Sending pulse")
@@ -127,7 +142,7 @@ try:
 			RectangularStimPulse('pulse', RectangularStimPulse.Default.Properties, stimAmplitude, stimWidth, 0, 0, 0),
 			positiveEndPoints, negativeEndPoints)
 
-		sleep(stimPeriod // 1000)
+		sleep(stimPeriod / 1000)
 
 finally:
 	if bioCam is not None:
@@ -144,16 +159,17 @@ finally:
 
 	# Print results
 	print("Packets received: {}, Errors received: {}, Packets lost: {}".format(data_received_count, data_error_count, data_loss_count))
-	loc = (17, 9) # Location where to observe activity
-	t = [1000, 3000] # Frame interval in which to observe activity
+	loc = (0, 1) # Location where to observe activity
+	t = [0, -1] # Frame interval in which to observe activity
 	series = np.array([], dtype='int16')
-	for d in data:
-		d = bytes(d)
+	for i, d in enumerate(data):
+		#d = bytes(d)
 		d = unpack('<' + 'h' * (len(d) // 2), d)
-		d = np.array(d, dtype='int16')
-		d = d[loc[0] * 64 + loc[1]::4096]
+		d = np.array(d, dtype='int16').reshape(-1, 4096).T
+		d = d[loc[0] * 64 + loc[1]]
 		series = np.concatenate([series, d], axis=0)
 	print(len(series))
+	plt.figure()
 	plt.plot(series[t[0]:t[1]])
 	plt.show()
 

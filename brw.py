@@ -1,5 +1,6 @@
 import argparse
 import os
+from tqdm import tqdm
 
 import h5py
 import json
@@ -13,12 +14,12 @@ import torch
 import utils
 
 
-_PATH = r"C:\Users\BioCAM User\Desktop\PyMEA\results\mnist\iter0\recordings0\7\CHIR_N1_DIV48_16113.pt"
-_DEST = r"C:\Users\BioCAM User\Desktop\PyMEA\results\mnist_brw\iter0\recordings0\7\CHIR_N1_DIV48_16113.brw"
+_PATH = r"C:\Users\BioCAM User\Desktop\PyMEA\results\custom\iter0\recordings0\0\CHIR_N1_DIV54_1.pt"
+_DEST = r"C:\Users\BioCAM User\Desktop\PyMEA\results\custom_brw\iter0\recordings0\0\CHIR_N1_DIV54_1.brw"
 _FRAMES_PER_CHUNK = 24690
 _SYNC_SIGNAL_PERIOD = 0.4 # None to disable. Default 400. Period in s of the synchronization signals to visualize on channel 0
 _SYNC_SIGNAL_DELAY = 0.07 # None to disable. Default 0. Delay in s of the first synchronization signal to visualize on channel 0
-_NOISE_SCALING  = 0.33
+_NOISE_SCALING  = 1.
 
 MaxAnalogValue = 8000.0
 MinAnalogValue = -8000.0
@@ -146,15 +147,16 @@ def write_brw(path, spike_times, channels, spike_forms, sf_starts, sigma_noise, 
 		return encChunk
 
 	def _write_sparse_raw(spike_times, channels, spike_forms, sf_starts, sigma_noise, fs, stim_time, duration, frames_per_chunk):
-		spike_times, channels, spike_forms, sf_starts, sigma_noise = _overwrite_sync_channel(spike_times, channels, spike_forms, sf_starts, sigma_noise, fs)
-		spike_times, channels, spike_forms, sf_starts, sigma_noise = _overwrite_ref_channel(spike_times, channels, spike_forms, sf_starts, sigma_noise, stim_time)
+		#spike_times, channels, spike_forms, sf_starts, sigma_noise = _overwrite_sync_channel(spike_times, channels, spike_forms, sf_starts, sigma_noise, fs)
+		#spike_times, channels, spike_forms, sf_starts, sigma_noise = _overwrite_ref_channel(spike_times, channels, spike_forms, sf_starts, sigma_noise, stim_time)
 		sf_ends = [s + len(spike_forms[i]) for i, s in enumerate(sf_starts)]
 		last_frame = max(sf_ends)
 		data = b''
 		toc = []
 		eventToc = []
 		noiseMean, noiseStdDev, noiseChIdxs, noiseToc = [], [], [], []
-		for chunk_start in range(0, last_frame, frames_per_chunk):
+		print("Writing chunks...")
+		for chunk_start in tqdm(range(0, last_frame, frames_per_chunk)):
 			chunk_end = chunk_start + frames_per_chunk
 			chunk = {chIdx: [] for chIdx in range(4096)}
 			for j, s in enumerate(sf_starts):

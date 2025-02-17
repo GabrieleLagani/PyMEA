@@ -17,7 +17,7 @@ dll_modules = ['3Brain.BioCamDriver', '3Brain.Common']
 for m in dll_modules:
 	clr.AddReference(m) # import .dll into python
 # Import C# Objects into Python from namespaces
-from _3Brain.BioCamDriver import BioCamPool, StimEndPoint, BioCamStimExternalEndPoint, StimTrainProtocol
+from _3Brain.BioCamDriver import BioCamPool, BioCamIOSignal, StimEndPoint, BioCamStimExternalEndPoint, StimTrainProtocol
 from _3Brain.Common import ChCoord, RectangularStimPulse
 from System import Console
 #Console.WriteLine("Hello from C#")
@@ -44,8 +44,8 @@ class MultiProcMEADeviceReader:
 
 	@staticmethod
 	def submit(d):
-		byte_seq = bytes(d)
-		future = MultiProcMEADeviceReader._executor.submit(MultiProcMEADeviceReader._worker_fn, byte_seq)
+		#byte_seq = bytes(d)
+		future = MultiProcMEADeviceReader._executor.submit(MultiProcMEADeviceReader._worker_fn, d)
 		MultiProcMEADeviceReader._jobs.append(future)
 
 	@staticmethod
@@ -87,6 +87,12 @@ class MEADevice:
 		self.isStreaming = False
 		self.training = False
 		self.true_fps = None
+
+		self._wellIdx = None
+		self._positiveEndPoints = None
+		self._negativeEndPoints = None
+		self._pulse = None
+		self._protocol = None
 
 		self._monitorshell = None
 
@@ -155,7 +161,8 @@ class MEADevice:
 		elif VERBOSE >= 2: MEADevice.log("Data received")
 		if MEADevice.is_recording():
 			MEADevice.data_received_count += 1
-			MEADevice.packets.put(e.Payload)
+			#MEADevice.packets.put(e.Payload)
+			MEADevice.packets.put(bytes(e.Payload))
 			if VERBOSE >= 2: MEADevice.log("Data recorded")
 
 	@staticmethod
@@ -170,7 +177,7 @@ class MEADevice:
 
 	@staticmethod
 	def BioCam_ProtocolStatusChanged(sender, status):
-		#print(status.Elapsed, status.Total, status.Progress)
+		#print(status.Elapsed, status.Progress, status.Total)
 		finished_time = utils.tic()
 		if MEADevice.stim_end_time <= 0: MEADevice.stim_end_time = finished_time
 
@@ -183,48 +190,49 @@ class MEADevice:
 		return amplitude * n, width
 
 	def get_pulse(self, normalize=1):
-		amplitude, width = (STIM_AMPLITUDE, STIM_WIDTH) if self.training else (TET_STIM_AMPLITUDE, TET_STIM_WIDTH)
+		amplitude, width = (TET_STIM_AMPLITUDE, TET_STIM_WIDTH) if self.training else (STIM_AMPLITUDE, STIM_WIDTH)
 		amplitude, width = self.normalize_current(normalize, amplitude, width)
-		return RectangularStimPulse('pulse', RectangularStimPulse.Default.Properties,
+		self._pulse = RectangularStimPulse('pulse', RectangularStimPulse.Default.Properties,
             #amplitude, width, 0, 0, 0)
 			#amplitude, width, 0, amplitude, width)
 			amplitude, width, 0, -amplitude, width)
+		return self._pulse
 
-	#def send_signal(self, signal):
-	#	if VERBOSE >= 1: MEADevice.log("Sending pulse with {} endpoint pairs".format(len(torch.nonzero(signal == 1))))
-	#
-	#	# Select positive and negative endpoints
-	#	positiveEndPoints = [self.bioCam.Stimulator.GetInternalEndPoint(ChCoord(l[0].item()+1, l[1].item()+1)) for l in torch.nonzero(signal == 1)]
-	#	negativeEndPoints = [self.bioCam.Stimulator.GetInternalEndPoint(ChCoord(l[0].item()+1, l[1].item()+1)) for l in torch.nonzero(signal == -1)]
-	#
-	#	# If no positive endpoint is selected, use external electrode as positive
-	#	if len(positiveEndPoints) == 0: positiveEndPoints = [self.bioCam.Stimulator.GetExternalEndPoint(BioCamStimExternalEndPoint.Ext1Plus)]
-	#	# If no negative endpoint is selected, use external electrode as negative
-	#	if len(negativeEndPoints) == 0: negativeEndPoints = [self.bioCam.Stimulator.GetExternalEndPoint(BioCamStimExternalEndPoint.Ext1Minus)]
-	#
-	#	# Send stimulus
-	#	self.bioCam.Stimulator.Send(self.get_pulse(normalize=max(len(positiveEndPoints), len(negativeEndPoints))),
-	#								positiveEndPoints, negativeEndPoints)
-
-	def send_signal(self, signal, freq=10, duration=100):
-		if VERBOSE >= 1: MEADevice.log("Sending signal with {} endpoint pairs".format(len(torch.nonzero(signal == 1))))
+	def send_signal(self, signal):
+		if VERBOSE >= 1: MEADevice.log("Sending pulse with {} endpoint pairs".format(len(torch.nonzero(signal == 1))))
 
 		# Select positive and negative endpoints
-		positiveEndPoints = [self.bioCam.Stimulator.GetInternalEndPoint(ChCoord(l[0].item()+1, l[1].item()+1)) for l in torch.nonzero(signal == 1)]
-		negativeEndPoints = [self.bioCam.Stimulator.GetInternalEndPoint(ChCoord(l[0].item()+1, l[1].item()+1)) for l in torch.nonzero(signal == -1)]
+		self._positiveEndPoints = [self.bioCam.Stimulator.GetInternalEndPoint(ChCoord(self._wellIdx, l[0].item() + 1, l[1].item() + 1)) for l in torch.nonzero(signal == 1)]
+		self._negativeEndPoints = [self.bioCam.Stimulator.GetInternalEndPoint(ChCoord(self._wellIdx, l[0].item() + 1, l[1].item() + 1)) for l in torch.nonzero(signal == -1)]
 
 		# If no positive endpoint is selected, use external electrode as positive
-		if len(positiveEndPoints) == 0: positiveEndPoints = [self.bioCam.Stimulator.GetExternalEndPoint(BioCamStimExternalEndPoint.Ext1Plus)]
+		if len(self._positiveEndPoints) == 0: self._positiveEndPoints = [self.bioCam.Stimulator.GetExternalEndPoint(BioCamStimExternalEndPoint.Ext1Plus)]
 		# If no negative endpoint is selected, use external electrode as negative
-		if len(negativeEndPoints) == 0: negativeEndPoints = [self.bioCam.Stimulator.GetExternalEndPoint(BioCamStimExternalEndPoint.Ext1Minus)]
+		if len(self._negativeEndPoints) == 0: self._negativeEndPoints = [self.bioCam.Stimulator.GetExternalEndPoint(BioCamStimExternalEndPoint.Ext1Minus)]
 
 		# Send stimulus
-		protocol = StimTrainProtocol('burst', self.get_pulse(normalize=max(len(positiveEndPoints), len(negativeEndPoints))),
+		self.bioCam.Stimulator.Send(self.get_pulse(normalize=max(len(self._positiveEndPoints), len(self._negativeEndPoints))),
+									self._positiveEndPoints, self._negativeEndPoints)
+
+	def send_burst(self, signal, freq=10, duration=100):
+		if VERBOSE >= 1: MEADevice.log("Sending burst with {} endpoint pairs".format(len(torch.nonzero(signal == 1))))
+
+		# Select positive and negative endpoints
+		self._positiveEndPoints = [self.bioCam.Stimulator.GetInternalEndPoint(ChCoord(l[0].item()+1, l[1].item()+1)) for l in torch.nonzero(signal == 1)]
+		self._negativeEndPoints = [self.bioCam.Stimulator.GetInternalEndPoint(ChCoord(l[0].item()+1, l[1].item()+1)) for l in torch.nonzero(signal == -1)]
+
+		# If no positive endpoint is selected, use external electrode as positive
+		if len(self._positiveEndPoints) == 0: self._positiveEndPoints = [self.bioCam.Stimulator.GetExternalEndPoint(BioCamStimExternalEndPoint.Ext1Plus)]
+		# If no negative endpoint is selected, use external electrode as negative
+		if len(self._negativeEndPoints) == 0: self._negativeEndPoints = [self.bioCam.Stimulator.GetExternalEndPoint(BioCamStimExternalEndPoint.Ext1Minus)]
+
+		# Send stimulus
+		self._protocol = StimTrainProtocol('burst', self.get_pulse(normalize=max(len(self._positiveEndPoints), len(self._negativeEndPoints))),
 									 RectangularStimPulse.Default.Properties, int(freq*duration/1000), float(freq))
-		protocol.WellsIndexes = [0]
-		protocol.PositiveEndPoints = positiveEndPoints
-		protocol.NegativeEndPoints = negativeEndPoints
-		self.bioCam.Stimulator.Protocol.LoadProtocol(0, protocol)
+		self._protocol.WellsIndexes = [self._wellIdx]
+		self._protocol.PositiveEndPoints = self._positiveEndPoints
+		self._protocol.NegativeEndPoints = self._negativeEndPoints
+		self.bioCam.Stimulator.Protocol.LoadProtocol(0, self._protocol)
 		self.bioCam.Stimulator.Protocol.StartProtocol(0)
 	
 	def read_activity(self):
@@ -251,6 +259,7 @@ class MEADevice:
 			raise RuntimeError("BioCam not connected")
 		if not self.bioCam.MeaPlate.IsConnected:
 			raise RuntimeError("MEA plate not connected")
+		self._wellIdx = self.bioCam.MeaPlate.Settings[0].WellIdx
 	
 		# Register event handlers
 		self.bioCam.DataReceived += MEADevice.BioCam_DataReceived
@@ -260,6 +269,13 @@ class MEADevice:
 		# Set chamber temperature
 		self.bioCam.MeaPlate.Settings.IsChamberTemperatureControlOn = True
 		self.bioCam.MeaPlate.Settings.SetChamberTemperatureCelsius = 37.
+
+		# Set hw filters
+		self.bioCam.Settings.IsHpPostEnabled = HP_FILTER_FREQ is not None
+		self.bioCam.Settings.HpPostCutOffFrequency = HP_FILTER_FREQ
+		self.bioCam.Settings.HpPostOrder = HP_FILTER_ORDER
+		self.bioCam.Settings.IsLpEnabled = LP_FILTER_FREQ is not None
+		self.bioCam.Settings.LpCutOffFrequency = LP_FILTER_FREQ
 
 		# Set internal chip calibration
 		if calibrationBlanking is not None: self.bioCam.MeaPlate.CalibrationBlankingValue = calibrationBlanking
@@ -283,6 +299,12 @@ class MEADevice:
 		self.bioCam.Settings.AproxTargetFrameRate = samplingRate
 		self.true_fps = self.get_true_fps()
 		MEADevice.log("Frame rate set to {}Hz".format(self.true_fps))
+
+		# Setting Calibration signal on pin 1, 1, and IO Signal on pin 1, 2
+		self.bioCam.Settings.IOSignalsSettings[BioCamIOSignal.InternalChipCalibration].IsOn = True
+		self.bioCam.Settings.IOSignalsSettings[BioCamIOSignal.InternalChipCalibration].OutputCh = ChCoord(1, 1)
+		self.bioCam.Settings.IOSignalsSettings[BioCamIOSignal.InternalStimulation].IsOn = True
+		self.bioCam.Settings.IOSignalsSettings[BioCamIOSignal.InternalStimulation].OutputCh = ChCoord(1, 2)
 		
 		# Start BioCam acquisition
 		self.isStreaming = self.bioCam.StartDataStreaming(dataPacketTimeSpanMs=acquisitionTimePeriod, optimizedDataPacketLatency=True)
@@ -295,8 +317,9 @@ class MEADevice:
 		if amplifShutOff is not None:
 			self.bioCam.Stimulator.Settings.IsStimCalibrationOn = True
 			self.bioCam.Stimulator.Settings.CalibrationDistanceMicroSec = amplifShutOff
-		self.bioCam.Stimulator.Protocol.InitializeProtocols(1)
-		self.bioCam.Stimulator.Protocol.PlayingProtocolProgressChanged += MEADevice.BioCam_ProtocolStatusChanged
+		if STIM_MODE == 'burst':
+			self.bioCam.Stimulator.Protocol.InitializeProtocols(1)
+			#self.bioCam.Stimulator.Protocol.PlayingProtocolProgressChanged += MEADevice.BioCam_ProtocolStatusChanged
 		self.bioCam.Stimulator.Start()
 		
 		# Send calibration signal
@@ -343,7 +366,7 @@ class OptoMEADevice(MEADevice):
 	def send_signal(self, signal):
 		raise NotImplemented
 
-	def send_burst(self, signal, freq, duration):
+	def send_burst(self, signal, freq=10, duration=100):
 		raise NotImplemented
 	
 
@@ -448,11 +471,11 @@ class DummyDevice:
 	def get_pulse(self):
 		return None
 
-	#def send_signal(self, signal):
-	#	if VERBOSE >= 1: DummyDevice.log("Sending pulse")
-	#	sleep(1e-3)
+	def send_signal(self, signal):
+		if VERBOSE >= 1: DummyDevice.log("Sending pulse")
+		sleep(1e-3)
 
-	def send_signal(self, signal, freq=100, duration=100):
+	def send_burst(self, signal, freq=100, duration=100):
 		if VERBOSE >= 1: DummyDevice.log("Sending signal")
 		sleep(1e-3)
 

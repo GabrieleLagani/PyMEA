@@ -117,8 +117,13 @@ def detect_spikes(data, freq, window, sigma_thr, save_width):
 	sigma = data.std(dim=0, keepdim=True)
 	num_windows = data.shape[0] // window
 	binned_data = data[:num_windows*window].reshape(num_windows, window, data.shape[1])
-	pos_peak, neg_peak = binned_data.max(dim=1), binned_data.min(dim=1)
-	idx = ((pos_peak[0] - neg_peak[0]) / sigma) > sigma_thr
+	pos_peak, neg_peak, std = binned_data.max(dim=1), binned_data.min(dim=1), binned_data.std(dim=1)
+	if sigma_thr[1] is not None: # Pre-filter outliers and recompute sigma
+		max_peak = torch.max(pos_peak[0], -neg_peak[0]).unsqueeze(1)
+		max_peak[max_peak < sigma_thr[1]*sigma] = 1
+		norm_data = binned_data / (max_peak + 1e-4)
+		sigma = norm_data.reshape(-1, data.shape[1]).std(dim=0, keepdim=True)
+	idx = torch.max(pos_peak[0], -neg_peak[0]) > sigma_thr[0]*sigma
 	spike_times, channels, spike_forms, sf_starts = [], [], [], []
 	for w in range(num_windows):
 		centers = (neg_peak[1][w, idx[w]] + w*window).reshape(-1)
@@ -135,12 +140,13 @@ def detect_spikes(data, freq, window, sigma_thr, save_width):
 	return spike_times, channels, spike_forms, sf_starts, sigma_noise
 
 # Save recordings obtained from MEA to disk
-def save_recording(raw, processed, pred, global_response, fps, stim_time, duration, dish_id, index, input, label, path):
+def save_recording(raw, processed, pred, global_response, delta, fps, stim_time, duration, dish_id, index, input, label, path):
 	d = {
 		'raw': raw,
 		'processed': processed,
 		'pred': pred,
 		'global_response': global_response,
+		'delta': delta,
 		'fps': fps,
 		'stim_time': stim_time,
 		'duration': duration,
@@ -165,7 +171,7 @@ def save_recording_params(path):
 		json.dump(recording_params, f)
 
 # Save recording data in the brw format
-def save_recording_brw(processed, path):
+def save_recording_brw(processed, path, fs, stim_time, duration, frames_per_chunk=24690):
 	# Not implemented
 	pass
 

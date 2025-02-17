@@ -75,7 +75,8 @@ Files `utils.py`, `data.py`, and `visualize.py` provide other utility functions.
 ## Requirements
 
 .Net Framework 4.7 is needed to run the MEA interface APIs. These C# APIs are then ported
-to Python via `pythonnet`. The `.dll` files of the APIs are provided by 3Brain to its customers.
+to Python via `pythonnet`. The `.dll` files of the APIs, provided by 3Brain to its customers, 
+must be placed in an `API` folder in the project root directory.
 Additional settings might be necessary. Contact the Author in case of problems.
 Python 3.10 or higher is recommended. Other necessary packages are listed in `requirements.txt`.
 

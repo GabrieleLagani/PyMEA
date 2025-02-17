@@ -6,8 +6,7 @@ import torch
 import utils
 
 
-PATH = 'results/mnist/iter0/recordings/0/N1_DIV30_25928.pt'
-#PATH = 'results/mnist/iter0/recordings/1/N1_DIV30_32334.pt'
+PATH = 'results/mnist/iter0/recordings0/0/CHIR_N1_DIV30_25928.pt'
 
 f = 20000.0 # Frequency of the recording.
 start, w = int(1000e-3 * f), int(2000e-3 * f) # Start time and window size to plot.
