@@ -84,8 +84,8 @@ class MultiProcOutputCollector:
 	@staticmethod
 	def _global_response(spike_times, fs, ref_time, w_start=0, w_end=5e-3):
 		ref_time, w_start, w_end = ref_time * fs, w_start * fs, w_end * fs
-		res = sum([1 if (st > ref_time + w_start) and (st <= ref_time + w_end) else 0 for st in spike_times])
-		delta = res - sum([1 if (st < ref_time - w_start) and (st >= ref_time - w_end) else 0 for st in spike_times])
+		res = len([st for st in spike_times if (st > ref_time + w_start) and (st <= ref_time + w_end)])
+		delta = res - len([st for st in spike_times if (st < ref_time - w_start) and (st >= ref_time - w_end)])
 		return res, delta
 
 	@staticmethod
