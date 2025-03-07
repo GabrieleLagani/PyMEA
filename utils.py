@@ -140,7 +140,7 @@ def detect_spikes(data, freq, window, sigma_thr, save_width):
 	return spike_times, channels, spike_forms, sf_starts, sigma_noise
 
 # Save recordings obtained from MEA to disk
-def save_recording(raw, processed, pred, global_response, delta, fps, stim_time, duration, dish_id, index, input, label, path):
+def save_recording(raw, processed, pred, global_response, delta, fps, sparsity, stim_time, duration, dish_id, index, input, label, path):
 	d = {
 		'raw': raw,
 		'processed': processed,
@@ -148,6 +148,7 @@ def save_recording(raw, processed, pred, global_response, delta, fps, stim_time,
 		'global_response': global_response,
 		'delta': delta,
 		'fps': fps,
+		'sparsity': sparsity,
 		'stim_time': stim_time,
 		'duration': duration,
 		'dish_id': dish_id,

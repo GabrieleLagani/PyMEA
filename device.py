@@ -213,6 +213,10 @@ class MEADevice:
 		# Send stimulus
 		self.bioCam.Stimulator.Send(self.get_pulse(normalize=max(len(self._positiveEndPoints), len(self._negativeEndPoints))),
 									self._positiveEndPoints, self._negativeEndPoints)
+		
+		# After a selected delay, disconnect activated electrodes to avoid electrical artifacts
+		sleep(disconnectDelay / 1000)
+		self.bioCam.ComPortSend(0x009C)
 
 	def send_burst(self, signal, freq=10, duration=100):
 		if VERBOSE >= 1: MEADevice.log("Sending burst with {} endpoint pairs".format(len(torch.nonzero(signal == 1))))
@@ -234,6 +238,10 @@ class MEADevice:
 		self._protocol.NegativeEndPoints = self._negativeEndPoints
 		self.bioCam.Stimulator.Protocol.LoadProtocol(0, self._protocol)
 		self.bioCam.Stimulator.Protocol.StartProtocol(0)
+		
+		# After a selected delay, disconnect activated electrodes to avoid electrical artifacts
+		utils.wait_until(utils.tic() + (disconnectDelay / 1000))
+		self.bioCam.ComPortSend(0x009C)
 	
 	def read_activity(self):
 		MEADevice.log("Reading recorded activity")

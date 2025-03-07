@@ -45,7 +45,7 @@ class MultiProcOutputCollector:
 		raw, filtered, processed, pred, stim_time, global_response, delta = MultiProcOutputCollector.process_output(raw, fs, assignments)
 		delivery_latency = (stim_time - RECORD_TIME[0]) if delivery_latency == 0 else delivery_latency
 		if mode == 'test':
-			utils.save_recording(raw, processed, pred, global_response, delta, fs, int(delivery_latency*fs + RECORD_TIME[0]*fs), int((RECORD_TIME[0]+RECORD_TIME[1])*fs), dish_id, index, input, label,
+			utils.save_recording(raw, processed, pred, global_response, delta, fs, MAX_FIRING_LIKELIHOOD, int(delivery_latency*fs + RECORD_TIME[0]*fs), int((RECORD_TIME[0]+RECORD_TIME[1])*fs), dish_id, index, input, label,
 								 os.path.join(savepath, '{}'.format(label), '{}_{}.pt'.format(dish_id, index)))
 			utils.save_recording_params(os.path.join(savepath, '{}'.format(label), '{}_{}_params.json'.format(dish_id, index)))
 			utils.save_recording_brw(processed, os.path.join(savepath, '{}'.format(label), '{}_{}.brw'.format(dish_id, index)),

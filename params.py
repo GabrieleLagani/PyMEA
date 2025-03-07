@@ -27,6 +27,7 @@ calibrationBlanking = 6 # None to disable. Default 0. Calibration blanking value
 calibrationInterval = 400 # None to disable. Default 400. Calibration interval in ms.
 amplifBias = 550 # None to disable. Set to 'auto' for automatic calibration. Default 550. Amplifier voltage offset in mV.
 amplifShutOff = 1500 # None to disable. Default 1500. Calibration time, i.e. amount of time in us that the amplifiers are shut off during stimulation.
+disconnectDelay = None # None to disable. Default None. Delay in ms to disconnect activated electrodes after stimulation, to avoid electrical artifacts.
 
 # Stimulation parameters
 STIM_MODE = 'pulse' # Default 'pulse'. Either 'pulse' or 'burst'. The type of stimulation to be used for the experiment.
